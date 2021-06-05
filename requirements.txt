@@ -1,4 +1,3 @@
-python-dateutil
 bs4
 mechanize
 requests
