@@ -5,7 +5,7 @@ It downloads all images from a user, as well as the metadatas (title, descriptio
 
 It currently doesn't have threading, which makes it quite slow, but it works  
 
-The "Fast mode" doesn't scrape favorites, description and keywords
+The "Fast mode" uses an alternate faster method that can't scrape favorites, description and keywords
 
 ### todo  
 add threading  
