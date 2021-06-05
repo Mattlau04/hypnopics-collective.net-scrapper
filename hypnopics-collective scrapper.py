@@ -114,6 +114,10 @@ def download_post(cookies, pid):
     
 
 def write_metadata_file(pid, title, views, datestr, rating, description, keywords, favorites):
+    try:
+        rating = int(rating)
+    except ValueError: #says 'This picture has not been rated yet.' if 0
+        rating = 0
     data = {
         'id': int(pid),
         'title': title,
