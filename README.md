@@ -9,6 +9,11 @@ The "Fast mode" uses an alternate faster method that can't scrape favorites, des
 
 Please leave a star if you found this useful!
 
+
+### Cool features  
+Fast mode to download way faster since you're using the index directly  
+Pick up where you left off if the download crashed  
+Good error handling if i do say so myself
+
 ### todo  
-add threading  
-add option to skip redownloading already downloaded stuff  
+add threading
