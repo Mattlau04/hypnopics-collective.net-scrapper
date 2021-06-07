@@ -10,6 +10,7 @@ import os
 import json
 from urllib.parse import urlparse
 import itertools, collections
+import time
 #from dateutil import parser
 
 base_url = "https://hypnopics-collective.net/smf_forum/index.php?action=gallery;sa=myimages;u={uid};start={offset}"
@@ -30,7 +31,7 @@ def get_cookies(username, password): #god they made this wayyyy too hard
     return br._ua_handlers['_cookies'].cookiejar #we get da cookies
 
 def get_last_page(cookies, uid):
-    r = requests.get(base_url.format(uid=uid, offset=0), cookies=cookies)
+    r = requests.get(base_url.format(uid=uid, offset=0), cookies=cookies, timeout=300)
     soup = BeautifulSoup(r.text, 'html.parser')
     pages = soup.find_all("a", {"class": 'navPages'})
     return max( [int(p.string) for p in pages] )
@@ -56,61 +57,90 @@ def get_all_post_id(cookies, uid):
     #We have all posts ids, we return
     return post_ids
         
-def download_post(cookies, pid):
-    r = requests.get(base_image_url.format(pid=pid), cookies=cookies)
+def download_post(cookies, pid, failcounter=1):
+    while True:
+        try:
+            r = requests.get(base_image_url.format(pid=pid), cookies=cookies, timeout=100)
+        except requests.exceptions.Timeout:
+            print(f"Downloading post {pid} timed out, trying again...")
+            continue
+        except requests.exceptions.RequestException:
+            print(f"Downloading post {pid} raised some network error, trying again...")
+        break
     soup = BeautifulSoup(r.text, 'html.parser')
 
-    #confusing mess, just know pointer is used to go down the html tree and that everything is VERY hardcoded
-    pointer = soup.find_all("tr", {"class": 'catbg'})[0]
-    title = pointer.td.string
-    pointer = pointer.find_next_sibling("tr")
-    img = pointer.td.a.img["src"]
-    pointer = pointer.find_next_sibling("tr").find_next_sibling("tr")
-    pointer = pointer.td
+    try:
+        #confusing mess, just know pointer is used to go down the html tree and that everything is VERY hardcoded
+        pointer = soup.find_all("tr", {"class": 'catbg'})[0]
+        title = pointer.td.string
+        pointer = pointer.find_next_sibling("tr")
+        img = pointer.td.a.img["src"]
+        pointer = pointer.find_next_sibling("tr").find_next_sibling("tr")
+        pointer = pointer.td
 
-    # for i in pointer.children:
-    #     print(i)
-    #     print("-------------\n\n")
+        # for i in pointer.children:
+        #     print(i)
+        #     print("-------------\n\n")
 
-    #info_string = pointer.children
-    #collections.deque(itertools.islice(info_string, 2)) #advance the iterator 2 times 
-    pointer = pointer.br.next_element.next_element
-    description = pointer.string.strip()
-    pointer = pointer.find_next_sibling("hr").find_next_sibling("br").next_element
-    views = pointer.string.replace("Views: ", "")
-    pointer = pointer.next_element.next_element
-    favorites = pointer.string.replace("Total Favorities: ", "")
-    pointer = pointer.find_next_sibling("br").next_element
-    keywords = []
-    while True: #iterate over the keywords
-        pointer = pointer.next_element
-        if pointer.name == "a": #found a keyword
-            keywords.append(pointer.string)
-        elif pointer.name == "br": #we reached the end of keywords, exit
+        #info_string = pointer.children
+        #collections.deque(itertools.islice(info_string, 2)) #advance the iterator 2 times 
+        pointer = pointer.br.next_element.next_element
+        description = pointer.string.strip()
+        pointer = pointer.find_next_sibling("hr").find_next_sibling("br").next_element
+        views = pointer.string.replace("Views: ", "")
+        pointer = pointer.next_element.next_element
+        favorites = pointer.string.replace("Total Favorities: ", "")
+        pointer = pointer.find_next_sibling("br").next_element
+        keywords = []
+        while True: #iterate over the keywords
+            pointer = pointer.next_element
+            if pointer.name == "a": #found a keyword
+                keywords.append(pointer.string)
+            elif pointer.name == "br": #we reached the end of keywords, exit
+                break
+
+        pointer = pointer.find_next_sibling().find_next_sibling().next_element.next_element
+        datestr = pointer.string.strip()
+        pointer = pointer.next_sibling.next_sibling.next_sibling
+        rating = pointer.string.replace("Rating: ", "")
+
+        # imgs = soup.find_all("img")
+        # img = next(i for i in imgs if not "thumb_" == i['src'])
+        file_extension = os.path.splitext(urlparse(img).path)[1]
+
+        #download the pic
+        while True:
+            try:
+                r = requests.get(img, stream=True, timeout=500)
+            except requests.exceptions.Timeout:
+                print(f"Downloading image for post {pid} timed out, trying again...")
+                continue
             break
+        with open(f"{download_dir}/{pid}{file_extension}", "wb+") as f:
+            f.write(r.content)
+        write_metadata_file(pid, 
+            title,
+            views, 
+            datestr, 
+            rating, 
+            description, 
+            keywords, 
+            favorites) 
+    except Exception as e: #global error handler, doesn't include network error
+        if failcounter > 20:
+            print(f"Error while processing post {pid} over 20 times, skipping it")
+            return
+        print(f"Error while processing post {pid}, retrying it from scratch in {round(failcounter*failcounter/2)} seconds")
+        print(e)
+        try:
+            for i in reversed(range(1, round(failcounter*failcounter/2 +1))): #scales up nicely
+                print(f"{i} seconds left, press ctrl + c to skip the countdown", end="\r", flush=True)
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        print("Retrying...                                                ", end="\r", flush=True)
+        download_post(cookies, pid, failcounter+1)
 
-    pointer = pointer.find_next_sibling().find_next_sibling().next_element.next_element
-    datestr = pointer.string.strip()
-    pointer = pointer.next_sibling.next_sibling.next_sibling
-    rating = pointer.string.replace("Rating: ", "")
-
-    # imgs = soup.find_all("img")
-    # img = next(i for i in imgs if not "thumb_" == i['src'])
-    file_extension = os.path.splitext(urlparse(img).path)[1]
-
-    #download the pic
-    r = requests.get(img, stream=True)
-    with open(f"{download_dir}/{pid}{file_extension}", "wb+") as f:
-        f.write(r.content)
-
-    write_metadata_file(pid, 
-        title,
-        views, 
-        datestr, 
-        rating, 
-        description, 
-        keywords, 
-        favorites) 
     
 
 def write_metadata_file(pid, title, views, datestr, rating, description, keywords, favorites):
@@ -192,13 +222,23 @@ print()
 try:
     os.mkdir(uid)
     print(f"Downloading files to {download_dir}")
+    do_overwrite = False #just in case
 except FileExistsError:
     if not os.listdir(download_dir): #if dir is empty
         print(f"Downloading files to {download_dir}")
+        do_overwrite = False #just in case
     else:
-        print(f"{download_dir} is already used, continuing might overwrite stuff")
-        print("Press enter to continue, or close the script")
-        input()
+        print(f"{download_dir} is already used")
+        print("Should we overwrite existing files? (saying no will just skip them)")
+        ow = ""
+        while not ow in ("y", "n", "yes", "no"):
+            ow = input("[Y/N] > ").lower()
+        if ow in ("y", "yes"):
+            print("Overwrite enabled")
+            do_overwrite = True
+        else:
+            print("Overwrite disabled")
+            do_overwrite = False
 
 print("Logging in...")
 cookies = get_cookies(username, password)
@@ -209,6 +249,11 @@ if do_fast_mode:
 else:
     print("Fetching posts to download...")
     post_ids = get_all_post_id(cookies, uid)
+    #filter the posts to not redownload
+    if not do_overwrite:
+        post_ids = [p for p in post_ids if not os.path.exists(f"{download_dir}/{p}.json")] #we check if the json exist
+        #this is perfect since we write the json file at the very end, so it won't skip if the pic download crashed, only if the pic was fully downloaded
+
     #we have all the post ids, time to get downloading
     print(f"Found {str(len(post_ids))} posts to download")
     for i, p in enumerate(sorted(post_ids, key=int, reverse=True), start=1):
