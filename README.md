@@ -9,6 +9,9 @@ The "Fast mode" uses an alternate faster method that can't scrape favorites, des
 
 Please leave a star if you found this useful!
 
+## Warning
+if you use the EXE, your antivirus will probably block the writting of the image  
+try disabling it if you get error "[Errno 13] Permission denied"
 
 ### Cool features  
 Fast mode to download way faster since you're using the index directly  
